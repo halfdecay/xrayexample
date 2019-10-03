@@ -1,0 +1,67 @@
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+
+#include <QMessageBox>
+
+MainWindow::MainWindow(QWidget *parent) :
+    QMainWindow(parent),
+    ui(new Ui::MainWindow)
+{
+    ui->setupUi(this);
+
+    m_pThread = new QThread(this);
+    // You do not need to specify a parent. The parent will be the stream, when we move our object emitter into it.
+    m_pEmitter = new Emitter;
+    /* We move the radiator object into a separate stream so that the synchronous pending operations are not blocked
+     the main GUI stream. Create a connection: Delete the radiator object when the flow ends.
+     Run the thread.*/
+    m_pEmitter->moveToThread(m_pThread);
+    connect(m_pThread, SIGNAL(finished()), m_pEmitter, SLOT(deleteLater()));
+    m_pThread->start();
+
+    // Verify the connection.
+    if (m_pEmitter->isConnected())
+    {
+        ui->pushButtonTurnOff->setEnabled(false);
+    }
+    else
+    {
+        ui->pushButtonSet->setEnabled(false);
+        ui->pushButtonTurnOn->setEnabled(false);
+        ui->pushButtonTurnOff->setEnabled(false);
+        QMessageBox::critical(this, "Connection error", "Connect the X-ray radiator to the COM3 serial port"
+                              " and restart the program.", QMessageBox::Ok);
+    }
+
+    // When you click on the "Enable" button, turn on the X-ray and switch the state of the buttons.
+    connect(ui->pushButtonTurnOn, &QPushButton::clicked, m_pEmitter, &Emitter::turnOnXRay);
+    connect(ui->pushButtonTurnOn, &QPushButton::clicked, [this](){
+        ui->pushButtonTurnOn->setEnabled(false);
+        ui->pushButtonTurnOff->setEnabled(true);
+    });
+
+    // When you click on the "Disable" button, turn off the X-ray and switch the state of the buttons.
+    connect(ui->pushButtonTurnOff, &QPushButton::clicked, m_pEmitter, &Emitter::turnOffXRay);
+    connect(ui->pushButtonTurnOff, &QPushButton::clicked, [this](){
+        ui->pushButtonTurnOn->setEnabled(true);
+        ui->pushButtonTurnOff->setEnabled(false);
+    });
+
+    // When you click on the "Set" button, all the relevant parameters are displayed in the spinBox.
+    connect(ui->pushButtonSet, &QPushButton::clicked, [this](){
+        emit setFeaturesRequested(ui->spinBoxVoltage->value(),
+                                  ui->spinBoxCurrent->value(),
+                                  ui->spinBoxWorkTime->value(),
+                                  ui->spinBoxCoolTime->value());
+    });
+    connect(this, &MainWindow::setFeaturesRequested, m_pEmitter, &Emitter::setFeatures);
+}
+
+MainWindow::~MainWindow()
+{
+    // Before deleting the main window, we wait until the thread finishes.
+    m_pThread->quit();
+    m_pThread->wait(1000);
+
+    delete ui;
+}
